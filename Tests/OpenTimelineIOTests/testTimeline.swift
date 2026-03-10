@@ -10,72 +10,84 @@ import XCTest
 import Foundation
 
 final class testTimeline: XCTestCase {
+    enum Error: Swift.Error {
+        case SetupFailed(String)
+    }
+
     override func setUpWithError() throws {
     }
 
     override func tearDownWithError() throws {
     }
 
-    func testMetadataRead() {
-        let inputName = "data/timeline.otio"
+    func testMetadataRead() throws {
         let knownDictKey = "foo"
         let knownKey = "some_key"
         let knownValue = "some_value"
         
-        guard let timelineInputPath = Bundle.module.path(forResource: inputName, ofType: "") else {
-            XCTFail("Missing test data `\(inputName)`")
-            return
-        }
+        let timeline = try timeline(from: "data/timeline.otio")
+        let timelineMetadata = timeline.metadata
 
-        do {
-            let otio = try SerializableObject.fromJSON(filename: timelineInputPath)
-            
-            guard let timeline = otio as? Timeline else {
-                XCTFail("Could not create Timeline object from \(timelineInputPath)")
-                return
-            }
-
-            let timelineMetadata = timeline.metadata
-
-            if let knownMetadata = timelineMetadata[knownDictKey] as? Metadata.Dictionary {
-                if let value = knownMetadata[knownKey] as? String {
-                    XCTAssertTrue(value == knownValue)
-                } else {
-                    XCTFail("Expects (\(knownKey), \(knownValue)), but found none in \(knownMetadata)")
-                }
+        if let knownMetadata = timelineMetadata[knownDictKey] as? Metadata.Dictionary {
+            if let value = knownMetadata[knownKey] as? String {
+                XCTAssertTrue(value == knownValue)
             } else {
-                XCTFail("Cannot read timeline metadata \(String(describing: timelineMetadata[knownDictKey])) as `Metadata.Dictionary`")
+                XCTFail("Expects (\(knownKey), \(knownValue)), but found none in \(knownMetadata)")
             }
-        } catch let error {
-            XCTFail("Cannot read OTIO file `\(timelineInputPath)`: \(error)")
+        } else {
+            XCTFail("Cannot read timeline metadata \(String(describing: timelineMetadata[knownDictKey])) as `Metadata.Dictionary`")
         }
     }
     
-    func testTimelineClipAvailableBounds() {
-        let inputName = "data/clip_example.otio"
+    func testTimelineClipAvailableBounds() throws {
+        let timeline = try timeline(from: "data/clip_example.otio")
         
-        guard let timelineInputPath = Bundle.module.path(forResource: inputName, ofType: "") else {
-            XCTFail("Missing test data `\(inputName)`")
-            return
+        if let firstClip = timeline.videoTracks.first!.children[1] as? Clip,
+           let mediaReference = firstClip.mediaReference,
+           let availableBounds = mediaReference.availableImageBounds
+        {
+            XCTAssertEqual(availableBounds, CGRect(origin: .zero, size: CGSize(width: 16, height: 9)))
+        }
+    }
+
+    func testTimelineFindClips() throws {
+        // SETUP
+        let timeline = try timeline(from: "data/nested_example.otio")
+
+        // EXERCISE
+        let clips = try timeline.findClips()
+
+        // VERIFY
+        XCTAssertEqual(
+            clips.map(\.name), 
+            [
+                "Normal Clip 1",
+                "Clip Inside A Stack 1",
+                "Normal Clip 2", 
+                "Clip Inside A Stack 2", 
+                "Normal Clip 3", 
+                "Clip Inside A Track", 
+                "Normal Clip 4"
+            ]
+        )
+    }
+
+    func timeline(from inputFilePath: String) throws -> Timeline {
+        guard let timelineInputPath = Bundle.module.path(forResource: inputFilePath, ofType: "") else {
+            throw Error.SetupFailed("Missing test data `\(inputFilePath)`")
         }
 
         do {
             let otio = try SerializableObject.fromJSON(filename: timelineInputPath)
-            
+
             guard let timeline = otio as? Timeline else {
-                XCTFail("Could not create Timeline object from \(timelineInputPath)")
-                return
+                throw Error.SetupFailed("Could not create Timeline object from \(timelineInputPath)")
             }
 
-            if let firstClip = timeline.videoTracks.first!.children[1] as? Clip,
-               let mediaReference = firstClip.mediaReference,
-               let availableBounds = mediaReference.availableImageBounds
-            {
-                XCTAssertEqual(availableBounds, CGRect(origin: .zero, size: CGSize(width: 16, height: 9)))
-            }
+            return timeline
 
         } catch let error {
-            XCTFail("Cannot read OTIO file `\(timelineInputPath)`: \(error)")
+            throw Error.SetupFailed("Cannot read OTIO file `\(timelineInputPath)`: \(error)")
         }
     }
     
